@@ -12,18 +12,44 @@
 #import "DVTFontAndColorTheme+PLYDataInjection.h"
 
 static NSString *const IDEIndexDidIndexWorkspaceNotification = @"IDEIndexDidIndexWorkspaceNotification";
-static NSInteger const IDEDefaultNumberOfColors = 10;
 
-@interface PLYVariableManager (){
-	NSInteger numberOfColors;
-}
+@interface PLYVariableManager ()
 
 @property (nonatomic, strong) NSMutableDictionary *workspaces;
-@property (nonatomic, strong) NSMutableArray* colorSpace;
+@property (nonatomic, strong) NSMutableDictionary *workspaceColorOffset;
 
 @end
 
 @implementation PLYVariableManager
+
+- (CGFloat)hue_offset:(NSUInteger)index forWorkSpace:(IDEWorkspace*)workSpace {
+	float offset = 0.f;
+	
+	if (!self.workspaceColorOffset[workSpace.name]) {
+		self.workspaceColorOffset[workSpace.name] = @0;
+	}
+	
+	NSInteger offset_level = [self.workspaceColorOffset[workSpace.name] integerValue];
+	
+	if (offset_level == 0) {
+		goto end;
+	}
+	
+	int swing = index % 2;
+	
+	if (swing) {
+		offset = 1.f + sin(index);
+	} else {
+		offset = 1.f + cos(index);
+	}
+	
+	offset /= 2.f;
+	
+end:
+	offset_level ++;
+	self.workspaceColorOffset[workSpace.name] = @(offset_level);
+	return offset;
+}
 
 #pragma mark - Singleton
 
@@ -45,8 +71,7 @@ static NSInteger const IDEDefaultNumberOfColors = 10;
     if ((self = [super init]))
     {
         self.workspaces = [[NSMutableDictionary alloc] init];
-		[self fillColorSpace];
-
+		self.workspaceColorOffset = [NSMutableDictionary new];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(indexDidIndexWorkspaceNotification:) name:IDEIndexDidIndexWorkspaceNotification object:nil];
     }
 
@@ -54,20 +79,6 @@ static NSInteger const IDEDefaultNumberOfColors = 10;
 }
 
 #pragma mark - Variable Management
-
-- (void)fillColorSpace {
-	self.colorSpace = [NSMutableArray new];
-	
-	for (int i = 0; i < numberOfColors; i++) {
-		CGFloat hueValue = (CGFloat)i/numberOfColors;
-		
-		NSColor* color = [NSColor colorWithCalibratedHue:hueValue
-											  saturation:[[DVTFontAndColorTheme currentTheme] ply_saturation]
-											  brightness:[[DVTFontAndColorTheme currentTheme] ply_brightness]
-												   alpha:1.f];
-		[self.colorSpace addObject:color];
-	}
-}
 
 - (NSMutableOrderedSet *)variableSetForWorkspace:(IDEWorkspace *)workspace
 {
@@ -87,26 +98,17 @@ static NSInteger const IDEDefaultNumberOfColors = 10;
     if (![variables containsObject:variable])
     {
         [variables addObject:variable];
-		// Why are you resorting? this only causes colors to possibly change dramatically
-		// Preferably removing this cause less hue shifting with adding of new variables
-		// but we prefer if variables never change color, for now we will block allocate
-		// color space so that color changes happen much less often and cause much less
-		// distraction.
-		//[variables sortUsingDescriptors:@[[[NSSortDescriptor alloc] initWithKey:@"self" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)]]];
+//		[variables sortUsingDescriptors:@[[[NSSortDescriptor alloc] initWithKey:@"self" ascending:YES selector:@selector(localizedCaseInsensitiveCompare:)]]];
     }
 
     NSUInteger index = [variables indexOfObject:variable];
-	
-	// Only reassign colors if our current colorSpace if full, grow and shrink colorspace
-    if (variables.count > numberOfColors) {
-		numberOfColors += IDEDefaultNumberOfColors;
-		[self fillColorSpace];
-	} else if (numberOfColors - IDEDefaultNumberOfColors > variables.count) {
-		numberOfColors -= IDEDefaultNumberOfColors;
-		[self fillColorSpace];
-	}
 
-    return self.colorSpace[index];
+	CGFloat hueValue = [self hue_offset:index forWorkSpace:workspace];
+	NSColor* color = [NSColor colorWithCalibratedHue:hueValue saturation:[[DVTFontAndColorTheme currentTheme] ply_saturation] brightness:[[DVTFontAndColorTheme currentTheme] ply_brightness] alpha:1.f];
+	if (!color) {
+		[NSColor grayColor];
+	}
+    return color;
 }
 
 - (void)indexDidIndexWorkspaceNotification:(NSNotification *)notification
